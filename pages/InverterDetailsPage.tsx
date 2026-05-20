@@ -102,7 +102,10 @@ const InverterDetailsPage: React.FC<Props> = ({ projects, onUpdateProject }) => 
             if (monthsDiff < 12) totalDegradationPercent = (monthsDiff + 1) * firstYearDegradationPerMonth;
             else totalDegradationPercent = build.degradation.firstYear + (monthsDiff - 11) * subsequentYearDegradationPerMonth;
           }
-          prDenominator += irradiation * (project.inverters[inverterIndex].moduleCount! * build.area * (1 - totalDegradationPercent / 100));
+          // IEC 61724 PR denominator: H_POA × P_DC × (1 − degradation).
+          // P_DC = moduleCount × Wp / 1000.
+          const dcCapacityKW = (project.inverters[inverterIndex].moduleCount! * build.wp) / 1000;
+          prDenominator += irradiation * dcCapacityKW * (1 - totalDegradationPercent / 100);
       }
       
       const pr = prDenominator > 0 ? (monthlyExport / prDenominator) * 100 : 0;

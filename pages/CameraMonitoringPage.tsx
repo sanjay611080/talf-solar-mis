@@ -1,14 +1,72 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Project, SiteStatus, Camera } from '../types';
+import { SiteStatus, Camera } from '../types';
 import { useAuth } from '../context/AuthContext';
 import CameraTile from '../components/CameraTile';
 import CameraDetailModal from '../components/CameraDetailModal';
 
-interface Props {
-  projects: Project[];
+/**
+ * Camera monitoring is not yet wired to a real source — the data source and
+ * device registration flow are still being decided. Until then this page runs
+ * on the self-contained mock below so the UI can be built and reviewed.
+ */
+interface MockCameraSite {
+  projectName: string;
+  projectState: string;
+  siteStatus: SiteStatus;
+  cameras: Camera[];
 }
+
+const MOCK_CAMERA_SITES: MockCameraSite[] = [
+  {
+    projectName: 'Gurgaon Commercial Rooftop',
+    projectState: 'Haryana',
+    siteStatus: 'operational',
+    cameras: [
+      { id: 'cam-ggn-01', name: 'Rooftop North', location: 'North Wing', isActive: true },
+      { id: 'cam-ggn-02', name: 'Rooftop South', location: 'South Wing', isActive: true },
+      { id: 'cam-ggn-03', name: 'Inverter Room', location: 'Ground Floor', isActive: false },
+      { id: 'cam-ggn-04', name: 'Main Gate', location: 'Entry Plaza', isActive: true },
+    ],
+  },
+  {
+    projectName: 'Bhadla Solar Park (Phase IV)',
+    projectState: 'Rajasthan',
+    siteStatus: 'operational',
+    cameras: [
+      { id: 'cam-bhd-01', name: 'Field Block A', location: 'Sector 1', isActive: true },
+      { id: 'cam-bhd-02', name: 'Field Block B', location: 'Sector 2', isActive: true },
+      { id: 'cam-bhd-03', name: 'Field Block C', location: 'Sector 3', isActive: true },
+      { id: 'cam-bhd-04', name: 'Inverter Yard', location: 'Central', isActive: false },
+      { id: 'cam-bhd-05', name: 'Substation', location: 'East', isActive: true },
+      { id: 'cam-bhd-06', name: 'Main Gate', location: 'South Boundary', isActive: true },
+    ],
+  },
+  {
+    projectName: 'Mumbai Industrial Park (Phase I)',
+    projectState: 'Maharashtra',
+    siteStatus: 'under-construction',
+    cameras: [
+      { id: 'cam-mh-01', name: 'Main Gate', location: 'Site Entrance', isActive: true },
+      { id: 'cam-mh-02', name: 'Module Yard', location: 'Storage Area', isActive: true },
+      { id: 'cam-mh-03', name: 'Crane Operations', location: 'Mounting Zone', isActive: true },
+      { id: 'cam-mh-04', name: 'Workforce Camp', location: 'South Side', isActive: false },
+      { id: 'cam-mh-05', name: 'Substation Build', location: 'East', isActive: true },
+    ],
+  },
+  {
+    projectName: 'Bangalore Tech Park Rooftop',
+    projectState: 'Karnataka',
+    siteStatus: 'under-construction',
+    cameras: [
+      { id: 'cam-ka-01', name: 'Rooftop North', location: 'North Block', isActive: true },
+      { id: 'cam-ka-02', name: 'Rooftop South', location: 'South Block', isActive: true },
+      { id: 'cam-ka-03', name: 'Material Storage', location: 'Ground Floor', isActive: false },
+      { id: 'cam-ka-04', name: 'Main Lobby', location: 'Entry', isActive: true },
+    ],
+  },
+];
 
 const ROTATION_OPTIONS = [
   { label: '10 sec', value: 10 },
@@ -18,7 +76,7 @@ const ROTATION_OPTIONS = [
   { label: '2 min',  value: 120 },
 ];
 
-const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
+const CameraMonitoringPage: React.FC = () => {
   const { currentUser } = useAuth();
   const [mode, setMode] = useState<SiteStatus>('operational');
   const [currentSiteIdx, setCurrentSiteIdx] = useState(0);
@@ -39,43 +97,31 @@ const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
     );
   }
 
-  const sitesForMode = useMemo(() => {
-    return projects.filter(p =>
-      (p.siteStatus || 'operational') === mode &&
-      (p.cameras?.length ?? 0) > 0
-    );
-  }, [projects, mode]);
+  const sitesForMode = useMemo(
+    () => MOCK_CAMERA_SITES.filter(s => s.siteStatus === mode && s.cameras.length > 0),
+    [mode],
+  );
 
   const stats = useMemo(() => {
-    const allCameras = projects.flatMap(p => p.cameras || []);
+    const allCameras = MOCK_CAMERA_SITES.flatMap(s => s.cameras);
     const total = allCameras.length;
     const active = allCameras.filter(c => c.isActive !== false).length;
-    const inactive = total - active;
     const withStream = allCameras.filter(c => !!c.streamUrl).length;
-    const sitesWithCams = projects.filter(p => (p.cameras?.length ?? 0) > 0).length;
-    const sitesWithoutCams = projects.length - sitesWithCams;
 
-    const opCams = projects
-      .filter(p => (p.siteStatus || 'operational') === 'operational')
-      .flatMap(p => p.cameras || []);
-    const ucCams = projects
-      .filter(p => p.siteStatus === 'under-construction')
-      .flatMap(p => p.cameras || []);
+    const opCams = MOCK_CAMERA_SITES.filter(s => s.siteStatus === 'operational').flatMap(s => s.cameras);
+    const ucCams = MOCK_CAMERA_SITES.filter(s => s.siteStatus === 'under-construction').flatMap(s => s.cameras);
 
     return {
       total,
       active,
-      inactive,
+      inactive: total - active,
       withStream,
-      withoutStream: total - withStream,
-      sitesWithCams,
-      sitesWithoutCams,
       opTotal: opCams.length,
       opActive: opCams.filter(c => c.isActive !== false).length,
       ucTotal: ucCams.length,
       ucActive: ucCams.filter(c => c.isActive !== false).length,
     };
-  }, [projects]);
+  }, []);
 
   // Reset index when mode or sites list changes
   useEffect(() => {
@@ -96,7 +142,7 @@ const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
   const goPrev = () => setCurrentSiteIdx(prev => (prev - 1 + sitesForMode.length) % sitesForMode.length);
   const goNext = () => setCurrentSiteIdx(prev => (prev + 1) % sitesForMode.length);
 
-  const cameraGridClass = currentSite && currentSite.cameras && currentSite.cameras.length > 4
+  const cameraGridClass = currentSite && currentSite.cameras.length > 4
     ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
     : 'grid-cols-1 sm:grid-cols-2';
 
@@ -111,10 +157,13 @@ const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
           <h1 className="text-3xl font-bold text-white mb-2">Camera Monitoring</h1>
           <p className="text-solar-text">Live surveillance feeds across all sites. Auto-rotates between sites for HO display walls.</p>
         </div>
+        <span className="text-xs bg-solar-bg border border-solar-border text-yellow-300 px-3 py-1.5 rounded">
+          Preview — mock feed data
+        </span>
       </header>
 
       {/* Camera health KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="bg-solar-card border border-solar-border rounded-lg p-4">
           <p className="kpi-label">Total Cameras</p>
           <p className="kpi-value text-white">{stats.total}</p>
@@ -135,13 +184,6 @@ const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
             <p className="text-xs text-gray-500">
               {stats.total > 0 ? `${Math.round((stats.inactive / stats.total) * 100)}%` : '—'}
             </p>
-          </div>
-        </div>
-        <div className="bg-solar-card border border-solar-border rounded-lg p-4 border-l-2 border-l-blue-400">
-          <p className="kpi-label">Stream Configured</p>
-          <div className="flex items-baseline gap-2">
-            <p className="kpi-value text-blue-300">{stats.withStream}</p>
-            <p className="text-xs text-gray-400">/ {stats.total}</p>
           </div>
         </div>
         <div className="bg-solar-card border border-solar-border rounded-lg p-4 border-l-2 border-l-solar-accent">
@@ -170,7 +212,7 @@ const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
             <span className="w-2 h-2 rounded-full bg-solar-success"></span>
             Operational Sites
             <span className="text-xs opacity-70 ml-1">
-              ({projects.filter(p => (p.siteStatus || 'operational') === 'operational' && (p.cameras?.length ?? 0) > 0).length})
+              ({MOCK_CAMERA_SITES.filter(s => s.siteStatus === 'operational').length})
             </span>
           </button>
           <button
@@ -180,15 +222,14 @@ const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
             <span className="w-2 h-2 rounded-full bg-yellow-400"></span>
             Under Construction
             <span className="text-xs opacity-70 ml-1">
-              ({projects.filter(p => p.siteStatus === 'under-construction' && (p.cameras?.length ?? 0) > 0).length})
+              ({MOCK_CAMERA_SITES.filter(s => s.siteStatus === 'under-construction').length})
             </span>
           </button>
         </div>
 
         {sitesForMode.length === 0 ? (
           <div className="text-center py-8 text-gray-400">
-            <p className="mb-2">No {mode === 'under-construction' ? 'under-construction' : 'operational'} sites with cameras configured.</p>
-            <p className="text-sm">Add cameras to a project from <Link to="/projects" className="text-solar-accent hover:underline">Project Management</Link>.</p>
+            <p>No {mode === 'under-construction' ? 'under-construction' : 'operational'} sites with cameras configured.</p>
           </div>
         ) : (
           <div className="flex justify-between items-center flex-wrap gap-3">
@@ -205,7 +246,7 @@ const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
               <div className="min-w-[200px]">
                 <p className="text-lg font-bold text-white leading-tight">{currentSite.projectName}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {currentSite.projectState} · {currentSite.cameras?.filter(c => c.isActive !== false).length ?? 0}/{currentSite.cameras?.length ?? 0} active · Site {currentSiteIdx + 1} of {sitesForMode.length}
+                  {currentSite.projectState} · {currentSite.cameras.filter(c => c.isActive !== false).length}/{currentSite.cameras.length} active · Site {currentSiteIdx + 1} of {sitesForMode.length}
                 </p>
               </div>
               <button
@@ -267,7 +308,7 @@ const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
       </div>
 
       {/* Camera grid */}
-      {currentSite && currentSite.cameras && currentSite.cameras.length > 0 && (
+      {currentSite && currentSite.cameras.length > 0 && (
         <div className={`grid gap-3 ${cameraGridClass}`}>
           {currentSite.cameras.map(camera => (
             <CameraTile
@@ -282,7 +323,7 @@ const CameraMonitoringPage: React.FC<Props> = ({ projects }) => {
       <CameraDetailModal
         isOpen={!!selectedCamera}
         camera={selectedCamera}
-        project={currentSite || null}
+        project={currentSite ? { projectName: currentSite.projectName, projectState: currentSite.projectState } : null}
         onClose={() => setSelectedCamera(null)}
       />
 

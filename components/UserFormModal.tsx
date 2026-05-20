@@ -8,7 +8,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   initialUser?: User | null;
-  onSave: (payload: UserPayload, isEdit: boolean, originalUsername?: string) => ServiceResult;
+  onSave: (payload: UserPayload, isEdit: boolean, originalUsername?: string) => Promise<ServiceResult>;
 }
 
 interface FormState {
@@ -53,7 +53,7 @@ const UserFormModal: React.FC<Props> = ({ isOpen, onClose, initialUser, onSave }
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -66,7 +66,7 @@ const UserFormModal: React.FC<Props> = ({ isOpen, onClose, initialUser, onSave }
       role: form.role,
     };
 
-    const result = onSave(payload, isEdit, initialUser?.username);
+    const result = await onSave(payload, isEdit, initialUser?.username);
     if (!result.success) {
       setError(result.error || 'Failed to save.');
       return;

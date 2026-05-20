@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import {
   ComposedChart,
   Line,
@@ -11,13 +11,11 @@ import {
   ResponsiveContainer,
   Brush,
 } from 'recharts';
-import { ChartDataPoint, TimeRange, User } from '../types';
+import { ChartDataPoint, User } from '../types';
 
 interface Props {
   data: ChartDataPoint[];
   height?: number;
-  timeRange?: TimeRange;
-  onTimeRangeChange?: (range: TimeRange) => void;
   title?: string;
   user: User | null;
   hasContainer?: boolean;
@@ -117,18 +115,8 @@ const CustomTooltip = ({ active, payload, label, showTarget }: any) => {
   return null;
 };
 
-const CombinedPerformanceChart: React.FC<Props> = ({ data, height = 450, timeRange: controlledTimeRange, onTimeRangeChange, title, user, hasContainer = true }) => {
-  const [internalTimeRange, setInternalTimeRange] = useState<TimeRange>('12M');
+const CombinedPerformanceChart: React.FC<Props> = ({ data, height = 450, title, user, hasContainer = true }) => {
   const showTarget = user?.role !== 'viewer';
-  const activeTimeRange = controlledTimeRange || internalTimeRange;
-
-  const handleTimeRangeChange = (range: TimeRange) => {
-    if (onTimeRangeChange) {
-      onTimeRangeChange(range);
-    } else {
-      setInternalTimeRange(range);
-    }
-  };
 
   const filteredData = useMemo(() => {
     if (data.length === 0) return [];
@@ -147,23 +135,9 @@ const CombinedPerformanceChart: React.FC<Props> = ({ data, height = 450, timeRan
 
   const chartBody = (
       <>
-        {onTimeRangeChange && (
-          <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
-              <h3 className="text-lg font-semibold text-solar-text">{title || 'Performance Trends'}</h3>
-              <div className="flex flex-wrap items-center gap-4">
-                  <div className="flex items-center bg-solar-bg rounded-lg border border-solar-border p-1 px-2">
-                  <span className="text-xs text-gray-400 px-2 uppercase font-bold">Timeline</span>
-                  {(['6M', '12M', 'ALL'] as TimeRange[]).map(range => (
-                      <button
-                      key={range}
-                      onClick={() => handleTimeRangeChange(range)}
-                      className={`px-3 py-1 text-xs rounded font-medium transition ${activeTimeRange === range ? 'bg-solar-success text-black' : 'text-gray-300 hover:bg-gray-700'}`}
-                      >
-                      {range}
-                      </button>
-                  ))}
-                  </div>
-              </div>
+        {title && (
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold text-solar-text">{title}</h3>
           </div>
         )}
         <div style={{ width: '100%', height: height }}>

@@ -47,29 +47,29 @@ const actionBadgeClass = (action: AuditAction) => {
 };
 
 const formatTimestamp = (iso: string) => {
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
+  const date = new Date(iso);
+  return date.toLocaleString(undefined, {
     year: 'numeric', month: 'short', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
 };
 
-const formatValue = (val: any): string => {
-  if (val === null || val === undefined) return '—';
-  if (typeof val === 'string') return val || '(empty)';
-  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
-  if (Array.isArray(val)) return `[${val.length} items]`;
-  return JSON.stringify(val);
+const formatValue = (value: any): string => {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'string') return value || '(empty)';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `[${value.length} items]`;
+  return JSON.stringify(value);
 };
 
 const AuditLogsPage: React.FC = () => {
   const { currentUser } = useAuth();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [actorFilter, setActorFilter] = useState<string>('all');
+  const [userFilter, setUserFilter] = useState<string>('all');
   const [actionFilter, setActionFilter] = useState<AuditAction | 'all'>('all');
   const [entityFilter, setEntityFilter] = useState<AuditEntityType | 'all'>('all');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
   const refresh = () => {
@@ -93,29 +93,29 @@ const AuditLogsPage: React.FC = () => {
     );
   }
 
-  const distinctActors = useMemo(
-    () => Array.from(new Set(logs.map(l => l.actor))).sort(),
-    [logs]
+  const distinctUsers = useMemo(
+    () => Array.from(new Set(logs.map(log => log.performedBy))).sort(),
+    [logs],
   );
 
-  const filtered = useMemo(() => {
+  const filteredLogs = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    return logs.filter(l => {
+    return logs.filter(log => {
       const matchesSearch = !term
-        || l.description.toLowerCase().includes(term)
-        || l.actor.toLowerCase().includes(term)
-        || (l.entityLabel && l.entityLabel.toLowerCase().includes(term))
-        || (l.entityId && l.entityId.toLowerCase().includes(term));
-      const matchesActor = actorFilter === 'all' || l.actor === actorFilter;
-      const matchesAction = actionFilter === 'all' || l.action === actionFilter;
-      const matchesEntity = entityFilter === 'all' || l.entityType === entityFilter;
-      return matchesSearch && matchesActor && matchesAction && matchesEntity;
+        || log.description.toLowerCase().includes(term)
+        || log.performedBy.toLowerCase().includes(term)
+        || (log.entityLabel && log.entityLabel.toLowerCase().includes(term))
+        || (log.entityId && log.entityId.toLowerCase().includes(term));
+      const matchesUser = userFilter === 'all' || log.performedBy === userFilter;
+      const matchesAction = actionFilter === 'all' || log.action === actionFilter;
+      const matchesEntity = entityFilter === 'all' || log.entityType === entityFilter;
+      return matchesSearch && matchesUser && matchesAction && matchesEntity;
     });
-  }, [logs, searchTerm, actorFilter, actionFilter, entityFilter]);
+  }, [logs, searchTerm, userFilter, actionFilter, entityFilter]);
 
   const clearFilters = () => {
     setSearchTerm('');
-    setActorFilter('all');
+    setUserFilter('all');
     setActionFilter('all');
     setEntityFilter('all');
   };
@@ -123,15 +123,10 @@ const AuditLogsPage: React.FC = () => {
   const handleClearLogs = () => {
     auditService.clearLogs();
     refresh();
-    setExpandedId(null);
+    setExpandedLogId(null);
   };
 
-  const handleSeedSamples = () => {
-    auditService.seedSampleLogs(true);
-    refresh();
-  };
-
-  const filtersActive = searchTerm || actorFilter !== 'all' || actionFilter !== 'all' || entityFilter !== 'all';
+  const filtersActive = searchTerm || userFilter !== 'all' || actionFilter !== 'all' || entityFilter !== 'all';
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -141,16 +136,6 @@ const AuditLogsPage: React.FC = () => {
           <p className="text-solar-text">Version history of every action — who did what, when, and what changed.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleSeedSamples}
-            className="px-3 py-2 rounded bg-solar-bg border border-solar-border text-solar-accent hover:text-yellow-300 hover:border-solar-accent transition flex items-center gap-2 text-sm"
-            title="Replace current logs with a curated set of sample entries"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-            </svg>
-            Generate Sample Logs
-          </button>
           <button
             onClick={refresh}
             className="px-3 py-2 rounded bg-solar-bg border border-solar-border text-gray-300 hover:text-white hover:border-solar-accent transition flex items-center gap-2 text-sm"
@@ -180,22 +165,22 @@ const AuditLogsPage: React.FC = () => {
               className="input-field"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Description, actor, entity..."
+              placeholder="Description, user, entity..."
             />
           </div>
           <div>
-            <label className="label">Actor</label>
-            <select className="input-field" value={actorFilter} onChange={e => setActorFilter(e.target.value)}>
-              <option value="all">All actors</option>
-              {distinctActors.map(a => <option key={a} value={a}>{a}</option>)}
+            <label className="label">User</label>
+            <select className="input-field" value={userFilter} onChange={e => setUserFilter(e.target.value)}>
+              <option value="all">All users</option>
+              {distinctUsers.map(name => <option key={name} value={name}>{name}</option>)}
             </select>
           </div>
           <div>
             <label className="label">Action</label>
             <select className="input-field" value={actionFilter} onChange={e => setActionFilter(e.target.value as any)}>
               <option value="all">All actions</option>
-              {Object.keys(ACTION_LABELS).map(a => (
-                <option key={a} value={a}>{ACTION_LABELS[a as AuditAction]}</option>
+              {Object.keys(ACTION_LABELS).map(action => (
+                <option key={action} value={action}>{ACTION_LABELS[action as AuditAction]}</option>
               ))}
             </select>
           </div>
@@ -203,15 +188,15 @@ const AuditLogsPage: React.FC = () => {
             <label className="label">Entity</label>
             <select className="input-field" value={entityFilter} onChange={e => setEntityFilter(e.target.value as any)}>
               <option value="all">All entities</option>
-              {Object.keys(ENTITY_LABELS).map(e => (
-                <option key={e} value={e}>{ENTITY_LABELS[e as AuditEntityType]}</option>
+              {Object.keys(ENTITY_LABELS).map(entity => (
+                <option key={entity} value={entity}>{ENTITY_LABELS[entity as AuditEntityType]}</option>
               ))}
             </select>
           </div>
         </div>
         {filtersActive && (
           <div className="mt-3 flex justify-between items-center text-xs text-gray-400">
-            <span>Showing {filtered.length} of {logs.length} entries</span>
+            <span>Showing {filteredLogs.length} of {logs.length} entries</span>
             <button onClick={clearFilters} className="text-solar-accent hover:underline">Clear filters</button>
           </div>
         )}
@@ -224,7 +209,7 @@ const AuditLogsPage: React.FC = () => {
             <thead className="table-header">
               <tr>
                 <th className="table-cell w-44">Timestamp</th>
-                <th className="table-cell w-32">Actor</th>
+                <th className="table-cell w-32">User</th>
                 <th className="table-cell w-32">Action</th>
                 <th className="table-cell w-32">Entity</th>
                 <th className="table-cell">Description</th>
@@ -232,25 +217,25 @@ const AuditLogsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-solar-border">
-              {filtered.length === 0 && (
+              {filteredLogs.length === 0 && (
                 <tr>
                   <td colSpan={6} className="text-center py-8 text-gray-500">
                     {logs.length === 0 ? 'No activity logged yet.' : 'No entries match the current filters.'}
                   </td>
                 </tr>
               )}
-              {filtered.map(log => {
-                const expanded = expandedId === log.id;
+              {filteredLogs.map(log => {
+                const isExpanded = expandedLogId === log.id;
                 const hasDetails = (log.changes && log.changes.length > 0) || (log.metadata && Object.keys(log.metadata).length > 0);
                 return (
                   <React.Fragment key={log.id}>
                     <tr
                       className={`hover:bg-solar-bg ${hasDetails ? 'cursor-pointer' : ''}`}
-                      onClick={() => hasDetails && setExpandedId(expanded ? null : log.id)}
+                      onClick={() => hasDetails && setExpandedLogId(isExpanded ? null : log.id)}
                     >
                       <td className="table-cell text-gray-400 font-mono text-xs">{formatTimestamp(log.timestamp)}</td>
                       <td className="table-cell">
-                        <span className="font-medium text-white">{log.actor}</span>
+                        <span className="font-medium text-white">{log.performedBy}</span>
                       </td>
                       <td className="table-cell">
                         <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${actionBadgeClass(log.action)}`}>
@@ -264,13 +249,13 @@ const AuditLogsPage: React.FC = () => {
                       <td className="table-cell text-gray-200">{log.description}</td>
                       <td className="table-cell text-center text-gray-500">
                         {hasDetails && (
-                          <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 inline transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 inline transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                           </svg>
                         )}
                       </td>
                     </tr>
-                    {expanded && hasDetails && (
+                    {isExpanded && hasDetails && (
                       <tr className="bg-solar-bg">
                         <td colSpan={6} className="px-6 py-4">
                           {log.changes && log.changes.length > 0 && (
@@ -286,11 +271,11 @@ const AuditLogsPage: React.FC = () => {
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {log.changes.map((c, i) => (
+                                    {log.changes.map((change, i) => (
                                       <tr key={i} className="border-t border-solar-border">
-                                        <td className="p-2 font-mono text-solar-accent">{c.field}</td>
-                                        <td className="p-2 text-red-300 font-mono break-all">{formatValue(c.before)}</td>
-                                        <td className="p-2 text-green-300 font-mono break-all">{formatValue(c.after)}</td>
+                                        <td className="p-2 font-mono text-solar-accent">{change.field}</td>
+                                        <td className="p-2 text-red-300 font-mono break-all">{formatValue(change.before)}</td>
+                                        <td className="p-2 text-green-300 font-mono break-all">{formatValue(change.after)}</td>
                                       </tr>
                                     ))}
                                   </tbody>

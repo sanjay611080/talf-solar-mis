@@ -82,11 +82,17 @@ export interface Project {
   dateOfCommissioning: string; // ISO String
   tariff: number; // Project-level fixed tariff
   plantId?: number; // Corresponding Plant ID from SolisCloud API
+  /**
+   * SolisCloud's authoritative lifetime generation (kWh). Set by the backend
+   * sync and used for the ALL-timeline "Total Generation" KPI so the number
+   * matches what SolisCloud's own dashboard reports — sum of per-month export
+   * can under-count when inverters have been replaced or the plant generated
+   * before being registered on SolisCloud.
+   */
+  lifetimeKWh?: number;
   inverters: Inverter[];
   monthlyData: Record<string, MonthlyData>; // Keyed by YYYY-MM
   breakdownEvents?: BreakdownEvent[];
-  siteStatus?: SiteStatus;
-  cameras?: Camera[];
 }
 
 export interface KPIResult {

@@ -35,7 +35,13 @@ const UserManagementPage: React.FC = () => {
   const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig | null>(null);
 
   useEffect(() => {
-    setUsers(userService.getUsers());
+    (async () => {
+      try {
+        setUsers(await userService.getUsers());
+      } catch (e) {
+        console.error('Failed to load users', e);
+      }
+    })();
   }, []);
 
   if (currentUser?.role !== 'admin') {
@@ -51,13 +57,23 @@ const UserManagementPage: React.FC = () => {
     );
   }
 
-  const refreshUsers = () => setUsers(userService.getUsers());
+  const refreshUsers = async () => {
+    try {
+      setUsers(await userService.getUsers());
+    } catch (e) {
+      console.error('Failed to refresh users', e);
+    }
+  };
 
-  const handleSave = (payload: userService.UserPayload, isEdit: boolean, originalUsername?: string): userService.ServiceResult => {
+  const handleSave = async (
+    payload: userService.UserPayload,
+    isEdit: boolean,
+    originalUsername?: string,
+  ): Promise<userService.ServiceResult> => {
     const result = isEdit && originalUsername
-      ? userService.updateUser(originalUsername, payload)
-      : userService.createUser(payload);
-    if (result.success) refreshUsers();
+      ? await userService.updateUser(originalUsername, payload)
+      : await userService.createUser(payload);
+    if (result.success) await refreshUsers();
     return result;
   };
 
@@ -77,8 +93,11 @@ const UserManagementPage: React.FC = () => {
 
     if (!willDeactivate) {
       // Activating doesn't need confirmation
-      userService.setUserActive(u.username, true);
-      refreshUsers();
+      (async () => {
+        const result = await userService.setUserActive(u.username, true);
+        if (!result.success) alert(result.error || 'Failed to activate user.');
+        await refreshUsers();
+      })();
       return;
     }
 
@@ -87,9 +106,10 @@ const UserManagementPage: React.FC = () => {
       message: `"${displayName}" will not be able to log in until you reactivate this account.`,
       variant: 'warning',
       confirmLabel: 'Deactivate',
-      onConfirm: () => {
-        userService.setUserActive(u.username, false);
-        refreshUsers();
+      onConfirm: async () => {
+        const result = await userService.setUserActive(u.username, false);
+        if (!result.success) alert(result.error || 'Failed to deactivate user.');
+        await refreshUsers();
       },
     });
   };
@@ -101,9 +121,10 @@ const UserManagementPage: React.FC = () => {
       message: `"${displayName}" will be permanently removed. This action cannot be undone.`,
       variant: 'danger',
       confirmLabel: 'Delete',
-      onConfirm: () => {
-        userService.deleteUser(u.username);
-        refreshUsers();
+      onConfirm: async () => {
+        const result = await userService.deleteUser(u.username);
+        if (!result.success) alert(result.error || 'Failed to delete user.');
+        await refreshUsers();
       },
     });
   };

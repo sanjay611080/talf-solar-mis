@@ -1,13 +1,13 @@
 
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Project } from '../types';
+import { Camera } from '../types';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   camera: Camera | null;
-  project: Project | null;
+  project: { projectName: string; projectState: string } | null;
 }
 
 const CameraDetailModal: React.FC<Props> = ({ isOpen, onClose, camera, project }) => {

@@ -34,22 +34,30 @@ const ModuleBuildsPage: React.FC = () => {
     );
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editingBuild || !editingBuild.name) return;
 
-    if (editingBuild.id) {
-      moduleBuildService.updateModuleBuild(editingBuild as ModuleBuild);
-    } else {
-      moduleBuildService.addModuleBuild(editingBuild as Omit<ModuleBuild, 'id'>);
+    try {
+      if (editingBuild.id) {
+        await moduleBuildService.updateModuleBuild(editingBuild as ModuleBuild);
+      } else {
+        await moduleBuildService.addModuleBuild(editingBuild as Omit<ModuleBuild, 'id'>);
+      }
+      setBuilds(moduleBuildService.getModuleBuilds());
+      setEditingBuild(null);
+    } catch (e) {
+      alert(`Failed to save module build: ${e instanceof Error ? e.message : 'Unknown error'}`);
     }
-    setBuilds(moduleBuildService.getModuleBuilds());
-    setEditingBuild(null);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this module build?')) {
-      moduleBuildService.deleteModuleBuild(id);
-      setBuilds(moduleBuildService.getModuleBuilds());
+      try {
+        await moduleBuildService.deleteModuleBuild(id);
+        setBuilds(moduleBuildService.getModuleBuilds());
+      } catch (e) {
+        alert(`Failed to delete module build: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      }
     }
   };
 

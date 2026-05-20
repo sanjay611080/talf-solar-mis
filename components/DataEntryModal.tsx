@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Project, MonthlyData } from '../types';
-import * as solisAPIService from '../services/solisAPIService';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -15,7 +14,6 @@ const DataEntryModal: React.FC<Props> = ({ isOpen, onClose, project, onSave }) =
   const { currentUser } = useAuth();
   const [localData, setLocalData] = useState<Record<string, MonthlyData>>({});
   const [isSaving, setIsSaving] = useState(false);
-  const [syncingMonth, setSyncingMonth] = useState<string | null>(null);
   const [tableRows, setTableRows] = useState<string[]>([]);
   const [openMonth, setOpenMonth] = useState<string | null>(null);
 
@@ -82,19 +80,6 @@ const DataEntryModal: React.FC<Props> = ({ isOpen, onClose, project, onSave }) =
     });
   };
   
-  const handleSyncMonth = async (e: React.MouseEvent, month: string) => {
-    e.stopPropagation();
-    setSyncingMonth(month);
-    try {
-      const syncedData = await solisAPIService.syncMonthData(project, month);
-      setLocalData(prev => ({ ...prev, [month]: syncedData }));
-    } catch (error: any) {
-      alert(`Error syncing data for ${month}: ${error.message}`);
-    } finally {
-      setSyncingMonth(null);
-    }
-  };
-
 
   const handleSaveClick = async () => {
     setIsSaving(true);
@@ -111,7 +96,7 @@ const DataEntryModal: React.FC<Props> = ({ isOpen, onClose, project, onSave }) =
         <div className="p-4 border-b border-solar-border flex justify-between items-center bg-solar-card">
           <div>
             <h2 className="text-xl font-bold text-white">Data Entry: {project.projectName}</h2>
-            <p className="text-sm text-gray-400">Sync from API or manually adjust targets. Measured values are read-only for Operations.</p>
+            <p className="text-sm text-gray-400">Manually adjust targets and irradiation. Measured generation is auto-synced every 10 minutes from SolisCloud.</p>
           </div>
           <button onClick={onClose} className="text-2xl text-gray-400 hover:text-white">&times;</button>
         </div>
@@ -155,13 +140,6 @@ const DataEntryModal: React.FC<Props> = ({ isOpen, onClose, project, onSave }) =
 
                   {isExpanded && (
                     <div className="bg-solar-bg border-t border-solar-border p-4">
-                       {(isAdmin || isOps) && (
-                         <div className="text-right mb-4">
-                           <button onClick={(e) => handleSyncMonth(e, month)} disabled={syncingMonth === month} className="btn-secondary">
-                             {syncingMonth === month ? <><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 20v-5h-5" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 9a9 9 0 0114.65-5.65L20 5" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 15a9 9 0 01-14.65 5.65L4 19" /></svg> Syncing...</> : 'Sync Month from API'}
-                           </button>
-                         </div>
-                       )}
                       <div className="grid grid-cols-5 gap-x-4 text-xs text-gray-400 uppercase font-bold px-3 pb-2 border-b border-solar-border">
                         <div className="col-span-1">Inverter</div>
                         <div className="text-right">Export (kWh)</div>

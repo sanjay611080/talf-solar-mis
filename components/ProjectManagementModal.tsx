@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Project, Inverter, ModuleBuild, Camera, SiteStatus } from '../types';
+import { Project, Inverter, ModuleBuild } from '../types';
 import { calculateProjectStaticCapacity } from '../services/dataService';
 import { getModuleBuilds } from '../services/moduleBuildService';
 
@@ -26,14 +26,7 @@ const createEmptyProject = (): Project => ({
   tariff: 0,
   inverters: [],
   monthlyData: {},
-  siteStatus: 'operational',
-  cameras: [],
 });
-
-const newCameraId = () =>
-  (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-    ? crypto.randomUUID()
-    : `cam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const ProjectManagementModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialProject }) => {
   const [project, setProject] = useState<Project>(createEmptyProject);
@@ -74,31 +67,6 @@ const ProjectManagementModal: React.FC<Props> = ({ isOpen, onClose, onSave, init
     setProject(prev => ({ ...prev, inverters: newInverters }));
   };
 
-  const handleAddCamera = () => {
-    setProject(prev => ({
-      ...prev,
-      cameras: [...(prev.cameras || []), { id: newCameraId(), name: `Camera ${(prev.cameras?.length ?? 0) + 1}`, isActive: true }],
-    }));
-  };
-
-  const handleRemoveCamera = (camIndex: number) => {
-    const newCameras = [...(project.cameras || [])];
-    newCameras.splice(camIndex, 1);
-    setProject(prev => ({ ...prev, cameras: newCameras }));
-  };
-
-  const handleCameraChange = (camIndex: number, field: keyof Camera, value: string) => {
-    const newCameras = [...(project.cameras || [])];
-    (newCameras[camIndex] as any)[field] = value;
-    setProject(prev => ({ ...prev, cameras: newCameras }));
-  };
-
-  const handleCameraActiveToggle = (camIndex: number) => {
-    const newCameras = [...(project.cameras || [])];
-    newCameras[camIndex] = { ...newCameras[camIndex], isActive: newCameras[camIndex].isActive === false };
-    setProject(prev => ({ ...prev, cameras: newCameras }));
-  };
-
   const handleSave = () => {
     setError('');
     const result = onSave(project);
@@ -110,6 +78,11 @@ const ProjectManagementModal: React.FC<Props> = ({ isOpen, onClose, onSave, init
   };
 
   const { totalKWac } = calculateProjectStaticCapacity(project);
+  // Total DC capacity = sum of each inverter's (module count x module build Wp).
+  const totalKWdc = project.inverters.reduce((sum, inv) => {
+    const build = inv.moduleBuildId ? moduleBuilds.find((b) => b.id === inv.moduleBuildId) : undefined;
+    return sum + ((inv.moduleCount || 0) * (build?.wp || 0)) / 1000;
+  }, 0);
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm overflow-y-auto">
@@ -132,23 +105,16 @@ const ProjectManagementModal: React.FC<Props> = ({ isOpen, onClose, onSave, init
             <div><label className="label">Project Owner</label><input type="text" className="input-field" value={project.projectOwner} onChange={(e) => setProject({ ...project, projectOwner: e.target.value })} /></div>
             <div><label className="label">Commissioning Date</label><input type="date" className="input-field" value={project.dateOfCommissioning.split('T')[0]} onChange={(e) => setProject({ ...project, dateOfCommissioning: new Date(e.target.value).toISOString() })} /></div>
             <div><label className="label">Fixed Tariff (₹)</label><input type="number" step="0.001" className="input-field" value={project.tariff} onChange={(e) => setProject({ ...project, tariff: parseFloat(e.target.value) })} /></div>
-            <div>
-              <label className="label">Site Status</label>
-              <select
-                className="input-field"
-                value={project.siteStatus || 'operational'}
-                onChange={(e) => setProject({ ...project, siteStatus: e.target.value as SiteStatus })}
-              >
-                <option value="operational">Operational</option>
-                <option value="under-construction">Under Construction</option>
-              </select>
-            </div>
           </div>
 
           <div className="bg-solar-card p-4 rounded border border-solar-border mb-6 flex justify-around">
             <div className="text-center">
               <p className="text-gray-400 text-xs uppercase">Total Fixed KWac</p>
               <p className="text-xl font-bold text-solar-success">{totalKWac.toLocaleString()}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-gray-400 text-xs uppercase">Total Fixed KWdc</p>
+              <p className="text-xl font-bold text-blue-300">{totalKWdc.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
             </div>
           </div>
 
@@ -157,66 +123,42 @@ const ProjectManagementModal: React.FC<Props> = ({ isOpen, onClose, onSave, init
               <h3 className="text-lg font-semibold text-white">Inverters & Modules</h3>
               <button onClick={handleAddInverter} className="px-3 py-1 text-sm bg-solar-accent text-solar-bg font-bold rounded hover:bg-yellow-400">+ Add Inverter</button>
             </div>
-            {project.inverters.map((inv, iIdx) => (
-              <div key={iIdx} className="bg-solar-card border border-solar-border rounded p-4 grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-                <div className="md:col-span-1"><label className="label-sm">Inverter Name</label><input type="text" className="input-field-sm" value={inv.name} onChange={(e) => handleInverterChange(iIdx, 'name', e.target.value)} /></div>
-                <div className="md:col-span-1"><label className="label-sm">Solis SN (for API)</label><input type="text" className="input-field-sm" value={inv.solisSn || ''} onChange={(e) => handleInverterChange(iIdx, 'solisSn', e.target.value)} /></div>
-                <div className="md:col-span-1">
-                  <label className="label-sm">Module Build</label>
-                  <select value={inv.moduleBuildId || ''} onChange={(e) => handleInverterChange(iIdx, 'moduleBuildId', e.target.value)} className="input-field-sm w-full">
-                    <option value="">Select Build...</option>
-                    {moduleBuilds.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
-                <div className="md:col-span-1"><label className="label-sm">Module Count</label><input type="number" className="input-field-sm" value={inv.moduleCount || ''} onChange={(e) => handleInverterChange(iIdx, 'moduleCount', parseInt(e.target.value, 10))} /></div>
-                <div className="flex items-end gap-4">
-                  <div><label className="label-sm">Fixed KWac</label><input type="number" className="input-field-sm" value={inv.kwac} onChange={(e) => handleInverterChange(iIdx, 'kwac', parseFloat(e.target.value))} /></div>
-                  <button onClick={() => handleRemoveInverter(iIdx)} className="text-red-500 hover:text-red-400 text-2xl pb-1" title="Remove inverter">&times;</button>
-                </div>
-              </div>
-            ))}
-            {project.inverters.length === 0 && <p className="text-sm text-gray-500 text-center py-4">No inverters added yet.</p>}
-          </div>
-
-          <div className="space-y-4 mt-8">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-semibold text-white">Site Cameras</h3>
-                <p className="text-xs text-gray-500 mt-1">Used by Camera Monitoring page. Stream URL is optional (HLS/MP4/embed iframe URL).</p>
-              </div>
-              <button onClick={handleAddCamera} className="px-3 py-1 text-sm bg-solar-accent text-solar-bg font-bold rounded hover:bg-yellow-400">+ Add Camera</button>
-            </div>
-            {(project.cameras || []).map((cam, cIdx) => {
-              const isActive = cam.isActive !== false;
+            {project.inverters.map((inv, iIdx) => {
+              // Fixed KWdc is derived: module build's Wp x module count.
+              const selectedBuild = inv.moduleBuildId
+                ? moduleBuilds.find(b => b.id === inv.moduleBuildId)
+                : undefined;
+              const fixedKWdc = ((inv.moduleCount || 0) * (selectedBuild?.wp || 0)) / 1000;
               return (
-                <div key={cam.id} className="bg-solar-card border border-solar-border rounded p-4 grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-                  <div className="md:col-span-1"><label className="label-sm">Camera Name</label><input type="text" className="input-field-sm" value={cam.name} onChange={(e) => handleCameraChange(cIdx, 'name', e.target.value)} /></div>
-                  <div className="md:col-span-1"><label className="label-sm">Location</label><input type="text" className="input-field-sm" value={cam.location || ''} onChange={(e) => handleCameraChange(cIdx, 'location', e.target.value)} placeholder="e.g. Main Gate" /></div>
-                  <div className="md:col-span-1"><label className="label-sm">Stream URL (optional)</label><input type="text" className="input-field-sm" value={cam.streamUrl || ''} onChange={(e) => handleCameraChange(cIdx, 'streamUrl', e.target.value)} placeholder="https://..." /></div>
+                <div key={iIdx} className="bg-solar-card border border-solar-border rounded p-4 grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+                  <div className="md:col-span-1"><label className="label-sm">Inverter Name</label><input type="text" className="input-field-sm" value={inv.name} onChange={(e) => handleInverterChange(iIdx, 'name', e.target.value)} /></div>
+                  <div className="md:col-span-1"><label className="label-sm">Solis SN (for API)</label><input type="text" className="input-field-sm" value={inv.solisSn || ''} onChange={(e) => handleInverterChange(iIdx, 'solisSn', e.target.value)} /></div>
                   <div className="md:col-span-1">
-                    <label className="label-sm">Status</label>
-                    <button
-                      type="button"
-                      onClick={() => handleCameraActiveToggle(cIdx)}
-                      className={`w-full px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border transition ${
-                        isActive
-                          ? 'bg-solar-success/20 text-solar-success border-solar-success/40 hover:bg-solar-success/30'
-                          : 'bg-gray-500/20 text-gray-400 border-gray-500/40 hover:bg-gray-500/30'
-                      }`}
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-solar-success' : 'bg-gray-500'}`} />
-                        {isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </button>
+                    <label className="label-sm">Module Build</label>
+                    <select value={inv.moduleBuildId || ''} onChange={(e) => handleInverterChange(iIdx, 'moduleBuildId', e.target.value)} className="input-field-sm w-full">
+                      <option value="">Select Build...</option>
+                      {moduleBuilds.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
                   </div>
-                  <div className="flex justify-end">
-                    <button onClick={() => handleRemoveCamera(cIdx)} className="text-red-500 hover:text-red-400 text-2xl pb-1" title="Remove camera">&times;</button>
+                  <div className="md:col-span-1"><label className="label-sm">Module Count</label><input type="number" className="input-field-sm" value={inv.moduleCount || ''} onChange={(e) => handleInverterChange(iIdx, 'moduleCount', parseInt(e.target.value, 10))} /></div>
+                  <div className="md:col-span-1"><label className="label-sm">Fixed KWac</label><input type="number" className="input-field-sm" value={inv.kwac} onChange={(e) => handleInverterChange(iIdx, 'kwac', parseFloat(e.target.value))} /></div>
+                  <div className="flex items-end gap-3">
+                    <div className="flex-1">
+                      <label className="label-sm">Fixed KWdc</label>
+                      <input
+                        type="number"
+                        className="input-field-sm bg-gray-700/60 cursor-not-allowed"
+                        value={Number.isFinite(fixedKWdc) ? fixedKWdc.toFixed(2) : '0'}
+                        readOnly
+                        title="Auto-calculated: module build Wp x module count"
+                      />
+                    </div>
+                    <button onClick={() => handleRemoveInverter(iIdx)} className="text-red-500 hover:text-red-400 text-2xl pb-1" title="Remove inverter">&times;</button>
                   </div>
                 </div>
               );
             })}
-            {(project.cameras?.length ?? 0) === 0 && <p className="text-sm text-gray-500 text-center py-4">No cameras configured.</p>}
+            {project.inverters.length === 0 && <p className="text-sm text-gray-500 text-center py-4">No inverters added yet.</p>}
           </div>
         </div>
 

@@ -1,139 +1,97 @@
 
-import { User, UserRole } from "../types";
+import { User, UserRole } from '../types';
+import { apiFetch, clearToken, setToken } from './apiClient';
 import * as auditService from './auditService';
 import * as securityService from './securityService';
 
 const SESSION_STORAGE_KEY = 'helios_mis_current_user';
-const USERS_STORAGE_KEY = 'helios_mis_users_v1';
 
-interface StoredUser {
-  username: string;
-  password: string;
-  role: UserRole;
-  fullName?: string;
-  email?: string;
-  contact?: string;
-  isActive?: boolean;
-}
-
-const defaultUsers: StoredUser[] = [
-  { username: 'admin',  password: 'password', role: 'admin',      fullName: 'Administrator',   isActive: true },
-  { username: 'ops',    password: 'password', role: 'operations', fullName: 'Operations User', isActive: true },
-  { username: 'viewer', password: 'password', role: 'viewer',     fullName: 'Viewer User',     isActive: true },
-];
-
-const getStoredUsers = (): StoredUser[] => {
-  try {
-    const stored = localStorage.getItem(USERS_STORAGE_KEY);
-    if (stored) {
-      const data = JSON.parse(stored);
-      if (Array.isArray(data) && data.length > 0) {
-        return data.map((u: any) => ({ ...u, isActive: u.isActive !== false }));
-      }
-    }
-  } catch (e) {
-    console.error("Failed to load users from local storage", e);
-  }
-  saveStoredUsers(defaultUsers);
-  return defaultUsers;
-};
-
-const saveStoredUsers = (users: StoredUser[]) => {
-  try {
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-  } catch (e) {
-    console.error("Failed to save users to local storage", e);
-  }
-};
-
-const toPublicUser = (u: StoredUser): User => ({
-  username: u.username,
-  role: u.role,
-  fullName: u.fullName,
-  email: u.email,
-  contact: u.contact,
-  isActive: u.isActive !== false,
-});
-
-// --- Login result ---
+// --- Login ---
 
 export type LoginResult =
   | { ok: true; user: User }
   | { ok: false; error: 'blocked' | 'invalid' | 'inactive'; remainingAttempts?: number };
 
-export const login = (username: string, pass: string): Promise<LoginResult> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const ip = securityService.getCurrentClientFakeIp();
+/**
+ * Authenticates against the backend. The security (IP-block) and audit wrappers
+ * are kept; only the credential check moved server-side.
+ */
+export const login = async (username: string, pass: string): Promise<LoginResult> => {
+  const ip = securityService.getCurrentClientFakeIp();
 
-      // Block check first — even valid creds don't get through if blocked.
-      if (securityService.isCurrentClientBlocked()) {
-        auditService.logEvent({
-          actor: 'system',
-          action: 'login_blocked',
-          entityType: 'auth',
-          description: `Blocked client tried to log in as "${username}"`,
-          metadata: { username, ip },
-        });
-        resolve({ ok: false, error: 'blocked' });
-        return;
-      }
+  if (securityService.isCurrentClientBlocked()) {
+    auditService.logEvent({
+      performedBy: 'system',
+      action: 'login_blocked',
+      entityType: 'auth',
+      description: `Blocked client tried to log in as "${username}"`,
+      metadata: { username, ip },
+    });
+    return { ok: false, error: 'blocked' };
+  }
 
-      const users = getStoredUsers();
-      const dbUser = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  try {
+    const { token, user } = await apiFetch<{ token: string; user: User }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password: pass }),
+    });
+    setToken(token);
+    const fullUser: User = {
+      username: user.username,
+      role: user.role,
+      fullName: user.fullName || user.username,
+      email: user.email,
+      contact: user.contact,
+      isActive: user.isActive !== false,
+    };
+    try {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(fullUser));
+    } catch (e) {
+      console.error('Could not save user to session storage', e);
+    }
+    securityService.clearFailedAttemptsForClient(securityService.getClientId());
+    auditService.logEvent({
+      performedBy: fullUser.username,
+      action: 'login_success',
+      entityType: 'auth',
+      description: `User "${fullUser.username}" logged in`,
+      metadata: { ip, role: fullUser.role },
+    });
+    return { ok: true, user: fullUser };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '';
 
-      if (!dbUser || dbUser.password !== pass) {
-        const result = securityService.recordFailedAttempt(username);
-        auditService.logEvent({
-          actor: 'system',
-          action: 'login_failed',
-          entityType: 'auth',
-          description: `Failed login attempt for "${username}"`,
-          metadata: {
-            username,
-            ip,
-            attemptCount: result.attemptCount,
-            wasBlocked: result.wasBlocked,
-          },
-        });
-        if (result.wasBlocked) {
-          resolve({ ok: false, error: 'blocked' });
-        } else {
-          resolve({ ok: false, error: 'invalid', remainingAttempts: result.remainingAttempts });
-        }
-        return;
-      }
+    // Backend unreachable — not a credential failure, don't penalize the IP.
+    if (/reach the backend/i.test(msg)) {
+      return { ok: false, error: 'invalid' };
+    }
 
-      if (dbUser.isActive === false) {
-        auditService.logEvent({
-          actor: 'system',
-          action: 'login_failed',
-          entityType: 'auth',
-          description: `Login attempt for inactive user "${username}"`,
-          metadata: { username, ip },
-        });
-        resolve({ ok: false, error: 'inactive' });
-        return;
-      }
-
-      // Success
-      const user = toPublicUser(dbUser);
-      try {
-        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
-      } catch (e) {
-        console.error('Could not save user to session storage', e);
-      }
-      securityService.clearFailedAttemptsForClient(securityService.getClientId());
+    // Backend rejected a deactivated account (HTTP 403).
+    if (/deactivated/i.test(msg)) {
       auditService.logEvent({
-        actor: user.username,
-        action: 'login_success',
+        performedBy: 'system',
+        action: 'login_failed',
         entityType: 'auth',
-        description: `User "${user.username}" logged in`,
-        metadata: { ip, role: user.role },
+        description: `Login attempt for inactive user "${username}"`,
+        metadata: { username, ip },
       });
-      resolve({ ok: true, user });
-    }, 500);
-  });
+      return { ok: false, error: 'inactive' };
+    }
+
+    // Invalid credentials.
+    const result = securityService.recordFailedAttempt(username);
+    auditService.logEvent({
+      performedBy: 'system',
+      action: 'login_failed',
+      entityType: 'auth',
+      description: `Failed login attempt for "${username}"`,
+      metadata: { username, ip, attemptCount: result.attemptCount, wasBlocked: result.wasBlocked },
+    });
+    if (result.wasBlocked) {
+      return { ok: false, error: 'blocked' };
+    }
+    return { ok: false, error: 'invalid', remainingAttempts: result.remainingAttempts };
+  }
 };
 
 export const logout = (): void => {
@@ -142,7 +100,7 @@ export const logout = (): void => {
     if (stored) {
       const user = JSON.parse(stored);
       auditService.logEvent({
-        actor: user.username,
+        performedBy: user.username,
         action: 'logout',
         entityType: 'auth',
         description: `User "${user.username}" logged out`,
@@ -152,24 +110,20 @@ export const logout = (): void => {
   } catch (e) {
     console.error('Could not remove user from session storage', e);
   }
+  clearToken();
 };
 
 export const getCurrentUser = (): User | null => {
   try {
     const storedUser = sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (storedUser) {
-      return JSON.parse(storedUser);
-    }
-    return null;
+    return storedUser ? (JSON.parse(storedUser) as User) : null;
   } catch (e) {
     console.error('Could not retrieve user from session storage', e);
     return null;
   }
 };
 
-export const getUsers = (): User[] => {
-  return getStoredUsers().map(toPublicUser);
-};
+// --- User management (backend) ---
 
 export interface UserPayload {
   fullName: string;
@@ -185,134 +139,77 @@ export interface ServiceResult {
   error?: string;
 }
 
-export const createUser = (payload: UserPayload): ServiceResult => {
-  if (!payload.username.trim() || !payload.fullName.trim()) {
-    return { success: false, error: 'Full name and username are required.' };
-  }
-  if (!payload.password) {
-    return { success: false, error: 'Password is required for new users.' };
-  }
-
-  const users = getStoredUsers();
-  const usernameLc = payload.username.trim().toLowerCase();
-  if (users.some(u => u.username.toLowerCase() === usernameLc)) {
-    return { success: false, error: `Username "${payload.username}" already exists.` };
-  }
-
-  const newUser: StoredUser = {
-    username: payload.username.trim(),
-    password: payload.password,
-    role: payload.role,
-    fullName: payload.fullName.trim(),
-    email: payload.email?.trim() || undefined,
-    contact: payload.contact?.trim() || undefined,
-    isActive: true,
-  };
-
-  saveStoredUsers([...users, newUser]);
-
-  auditService.logEvent({
-    action: 'create',
-    entityType: 'user',
-    entityId: newUser.username,
-    entityLabel: newUser.fullName || newUser.username,
-    description: `Created user "${newUser.username}" (${newUser.role})`,
-    metadata: {
-      role: newUser.role,
-      email: newUser.email,
-      contact: newUser.contact,
-    },
-  });
-
-  return { success: true };
+export const getUsers = async (): Promise<User[]> => {
+  return apiFetch<User[]>('/users');
 };
 
-export const updateUser = (originalUsername: string, payload: UserPayload): ServiceResult => {
-  if (!payload.username.trim() || !payload.fullName.trim()) {
-    return { success: false, error: 'Full name and username are required.' };
+export const createUser = async (payload: UserPayload): Promise<ServiceResult> => {
+  try {
+    const created = await apiFetch<User>('/users', { method: 'POST', body: JSON.stringify(payload) });
+    auditService.logEvent({
+      action: 'create',
+      entityType: 'user',
+      entityId: created.username,
+      entityLabel: created.fullName || created.username,
+      description: `Created user "${created.username}" (${created.role})`,
+      metadata: { role: created.role, email: created.email, contact: created.contact },
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Failed to create user.' };
   }
-
-  const users = getStoredUsers();
-  const idx = users.findIndex(u => u.username === originalUsername);
-  if (idx === -1) return { success: false, error: 'User not found.' };
-
-  const newUsername = payload.username.trim();
-  if (
-    newUsername.toLowerCase() !== originalUsername.toLowerCase() &&
-    users.some(u => u.username.toLowerCase() === newUsername.toLowerCase())
-  ) {
-    return { success: false, error: `Username "${newUsername}" already in use.` };
-  }
-
-  const before = users[idx];
-  const after: StoredUser = {
-    username: newUsername,
-    password: payload.password ? payload.password : before.password,
-    role: payload.role,
-    fullName: payload.fullName.trim(),
-    email: payload.email?.trim() || undefined,
-    contact: payload.contact?.trim() || undefined,
-    isActive: before.isActive !== false,
-  };
-  users[idx] = after;
-  saveStoredUsers(users);
-
-  const changes = auditService.computeChanges(
-    { fullName: before.fullName, email: before.email, contact: before.contact, role: before.role, username: before.username },
-    { fullName: after.fullName,  email: after.email,  contact: after.contact,  role: after.role,  username: after.username },
-  );
-  if (payload.password) {
-    changes.push({ field: 'password', before: '••••••', after: '•••••• (changed)' });
-  }
-
-  auditService.logEvent({
-    action: 'update',
-    entityType: 'user',
-    entityId: originalUsername,
-    entityLabel: after.fullName || after.username,
-    description: `Updated user "${after.username}"`,
-    changes,
-  });
-
-  return { success: true };
 };
 
-export const setUserActive = (username: string, active: boolean): ServiceResult => {
-  const users = getStoredUsers();
-  const idx = users.findIndex(u => u.username === username);
-  if (idx === -1) return { success: false, error: 'User not found.' };
-  users[idx].isActive = active;
-  saveStoredUsers(users);
-
-  auditService.logEvent({
-    action: active ? 'activate' : 'deactivate',
-    entityType: 'user',
-    entityId: username,
-    entityLabel: users[idx].fullName || username,
-    description: `${active ? 'Activated' : 'Deactivated'} user "${username}"`,
-  });
-
-  return { success: true };
+export const updateUser = async (originalUsername: string, payload: UserPayload): Promise<ServiceResult> => {
+  try {
+    const saved = await apiFetch<User>(`/users/${encodeURIComponent(originalUsername)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    auditService.logEvent({
+      action: 'update',
+      entityType: 'user',
+      entityId: originalUsername,
+      entityLabel: saved.fullName || saved.username,
+      description: `Updated user "${saved.username}"`,
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Failed to update user.' };
+  }
 };
 
-export const deleteUser = (username: string): ServiceResult => {
-  const users = getStoredUsers();
-  const target = users.find(u => u.username === username);
-  if (!target) return { success: false, error: 'User not found.' };
-  saveStoredUsers(users.filter(u => u.username !== username));
+export const setUserActive = async (username: string, active: boolean): Promise<ServiceResult> => {
+  try {
+    await apiFetch(`/users/${encodeURIComponent(username)}/active`, {
+      method: 'PATCH',
+      body: JSON.stringify({ active }),
+    });
+    auditService.logEvent({
+      action: active ? 'activate' : 'deactivate',
+      entityType: 'user',
+      entityId: username,
+      entityLabel: username,
+      description: `${active ? 'Activated' : 'Deactivated'} user "${username}"`,
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Failed to update user.' };
+  }
+};
 
-  auditService.logEvent({
-    action: 'delete',
-    entityType: 'user',
-    entityId: username,
-    entityLabel: target.fullName || username,
-    description: `Deleted user "${username}"`,
-    metadata: {
-      role: target.role,
-      email: target.email,
-      contact: target.contact,
-    },
-  });
-
-  return { success: true };
+export const deleteUser = async (username: string): Promise<ServiceResult> => {
+  try {
+    await apiFetch(`/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    auditService.logEvent({
+      action: 'delete',
+      entityType: 'user',
+      entityId: username,
+      entityLabel: username,
+      description: `Deleted user "${username}"`,
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Failed to delete user.' };
+  }
 };

@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Project, BreakdownEvent, MonthlyData } from './types';
 import { loadProjects, saveProjects } from './services/dataService';
+import { initModuleBuilds } from './services/moduleBuildService';
 import * as auditService from './services/auditService';
 import { AuditChange } from './services/auditService';
 import Dashboard from './pages/Dashboard';
@@ -17,6 +18,7 @@ import AuditLogsPage from './pages/AuditLogsPage';
 import SecurityPage from './pages/SecurityPage';
 import Layout from './components/Layout';
 import { SaveResult } from './components/ProjectManagementModal';
+import SyncStatusWidget from './components/SyncStatusWidget';
 import { useAuth } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 
@@ -102,6 +104,7 @@ const App: React.FC = () => {
       if (currentUser) {
         try {
           setIsDataLoading(true);
+          await initModuleBuilds();
           const data = await loadProjects();
           setProjects(data);
         } catch (err) {
@@ -123,7 +126,7 @@ const App: React.FC = () => {
       setProjects(updatedProjects);
       saveProjects(updatedProjects);
 
-      const topLevelFields = ['projectName', 'projectState', 'projectOwner', 'tariff', 'siteStatus', 'dateOfCommissioning'];
+      const topLevelFields = ['projectName', 'projectState', 'projectOwner', 'tariff', 'dateOfCommissioning'];
       const changes = before ? auditService.computeChanges(before, projectToSave, topLevelFields) : [];
       if (before) {
         if (before.inverters.length !== projectToSave.inverters.length) {
@@ -131,15 +134,6 @@ const App: React.FC = () => {
             field: 'inverters',
             before: `${before.inverters.length} inverter(s)`,
             after: `${projectToSave.inverters.length} inverter(s)`,
-          });
-        }
-        const beforeCams = before.cameras?.length || 0;
-        const afterCams = projectToSave.cameras?.length || 0;
-        if (beforeCams !== afterCams) {
-          changes.push({
-            field: 'cameras',
-            before: `${beforeCams} camera(s)`,
-            after: `${afterCams} camera(s)`,
           });
         }
       }
@@ -174,8 +168,6 @@ const App: React.FC = () => {
         owner: projectToSave.projectOwner,
         tariff: projectToSave.tariff,
         inverters: projectToSave.inverters.length,
-        cameras: projectToSave.cameras?.length || 0,
-        siteStatus: projectToSave.siteStatus,
       },
     });
 
@@ -342,7 +334,7 @@ const App: React.FC = () => {
                   />
                 }
               />
-              <Route path="/cameras" element={<CameraMonitoringPage projects={projects} />} />
+              <Route path="/cameras" element={<CameraMonitoringPage />} />
               <Route path="/users" element={<UserManagementPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/module-builds" element={<ModuleBuildsPage />} />
@@ -350,6 +342,7 @@ const App: React.FC = () => {
               <Route path="/security" element={<SecurityPage />} />
             </Routes>
           </Layout>
+          <SyncStatusWidget />
         </>
       )}
     </BrowserRouter>

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Inverter, SolisRealTimeData } from '../types';
-import { fetchRealTimeData, fetchDailyGenerationCurve } from '../services/solisAPIService';
+import { fetchRealTimeData, fetchDailyGenerationCurve, getSolisSn } from '../services/solisAPIService';
 import { SOLIS_POINT_IDS } from '../constants';
 import DailyGenerationChart from './DailyGenerationChart';
 
@@ -54,8 +54,8 @@ const InverterLiveData: React.FC<Props> = ({ inverter, dateOfCommissioning }) =>
     setAvailableYears(years);
 
     const fetchAllData = async () => {
-      if (!inverter.psKey) {
-        setError("Inverter is not configured for live data (missing psKey).");
+      if (!getSolisSn(inverter)) {
+        setError("Inverter is not linked to a SolisCloud device (missing serial number).");
         setIsLoading(false);
         return;
       }
@@ -118,7 +118,7 @@ const InverterLiveData: React.FC<Props> = ({ inverter, dateOfCommissioning }) =>
   useEffect(() => {
      // Effect for interval updates of real-time KPI data (only)
     const interval = setInterval(async () => {
-      if (!inverter.psKey || document.hidden) return; // don't fetch if tab is not active
+      if (!getSolisSn(inverter) || document.hidden) return; // don't fetch if tab is not active
       try {
         const realtimeResult = await fetchRealTimeData(inverter);
         setData(realtimeResult);
@@ -129,7 +129,7 @@ const InverterLiveData: React.FC<Props> = ({ inverter, dateOfCommissioning }) =>
     }, 60000);
 
     return () => clearInterval(interval);
-  }, [inverter.psKey]);
+  }, [getSolisSn(inverter)]);
   
   useEffect(() => {
     // Update chart series when visibility changes

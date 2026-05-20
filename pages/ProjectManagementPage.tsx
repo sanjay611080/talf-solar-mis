@@ -5,6 +5,7 @@ import { Project, TimeRange } from '../types';
 import { calculateKPIs } from '../services/dataService';
 import { useAuth } from '../context/AuthContext';
 import ProjectManagementModal, { SaveResult } from '../components/ProjectManagementModal';
+import { formatEnergyKWhString, formatINR } from '../utils/format';
 
 interface Props {
   projects: Project[];
@@ -14,15 +15,6 @@ interface Props {
 const SortIcon = ({ direction }: { direction: 'asc' | 'desc' | null }) => {
   if (!direction) return <span className="text-gray-600 ml-1 opacity-0 group-hover:opacity-50">⇅</span>;
   return <span className="text-solar-accent ml-1">{direction === 'asc' ? '▲' : '▼'}</span>;
-};
-
-const formatIndian = (n: number, type: 'curr' | 'unit' = 'unit') => {
-  const prefix = type === 'curr' ? '₹' : '';
-  if (n === undefined || n === null || isNaN(n)) return '-';
-  if (n >= 10000000) return `${prefix}${(n / 10000000).toFixed(2)} Cr`;
-  if (n >= 100000)   return `${prefix}${(n / 100000).toFixed(2)} L`;
-  if (n >= 1000)     return `${prefix}${(n / 1000).toFixed(1)}k`;
-  return `${prefix}${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 };
 
 const ProjectManagementPage: React.FC<Props> = ({ projects, onSaveProject }) => {
@@ -41,33 +33,71 @@ const ProjectManagementPage: React.FC<Props> = ({ projects, onSaveProject }) => 
   );
 
   const aggregateTotals = useMemo(() => {
-    const totals = { netEnergy: 0, revenue: 0, totalCapacityKWdc: 0, totalDays: 0 };
-    projectKPIs.forEach(k => {
+    // Track gross export AND net separately: "Generation" matches SolisCloud
+    // (gross export); net (export − import) drives revenue and yield maths.
+    const totals = {
+      totalExport: 0,
+      lifetimeKWh: 0,
+      lifetimeRevenue: 0,
+      netEnergy: 0,
+      revenue: 0,
+      totalCapacityKWdc: 0,
+      totalDays: 0,
+    };
+    projectKPIs.forEach((k, idx) => {
+      const p = projects[idx];
+      totals.totalExport += k.totalExport;
+      totals.lifetimeKWh += p?.lifetimeKWh || 0;
+      totals.lifetimeRevenue += (p?.lifetimeKWh || 0) * (p?.tariff || 0);
       totals.netEnergy += k.netEnergy;
       totals.revenue += k.revenue;
       totals.totalCapacityKWdc += k.totalCapacityKWdc;
     });
-    totals.totalDays = projectKPIs.length > 0 ? projectKPIs[0].totalDays : 0;
+    // Sum of (DC capacity × operational days) across all projects — the right
+    // portfolio denominator for daily yield. Using the first project's days
+    // (the previous behaviour) was wrong because every project has a different
+    // commissioning date and therefore a different operational duration.
+    const totalCapacityDaysDc = projectKPIs.reduce(
+      (sum, k) => sum + k.totalCapacityKWdc * k.totalDays,
+      0,
+    );
+    totals.totalDays = projectKPIs.reduce((sum, k) => sum + k.totalDays, 0);
 
     const totalCapDc = totals.totalCapacityKWdc || 1;
     const dcCuf = projectKPIs.reduce((acc, k) => acc + (k.dcCuf * k.totalCapacityKWdc), 0) / totalCapDc;
-    const averageDailyYield = (totals.totalDays > 0 && totals.totalCapacityKWdc > 0)
-      ? (totals.netEnergy / totals.totalCapacityKWdc / totals.totalDays)
+    const averageDailyYield = totalCapacityDaysDc > 0
+      ? totals.netEnergy / totalCapacityDaysDc
       : 0;
+    // For the ALL row, prefer Solis's authoritative lifetime figures so the
+    // aggregate matches SolisCloud's "Total Yield" and "Total Earning".
+    const useLifetime = timeRange === 'ALL' && totals.lifetimeKWh > 0;
+    const generation = useLifetime ? totals.lifetimeKWh : totals.totalExport;
+    const revenue = useLifetime && totals.lifetimeRevenue > 0 ? totals.lifetimeRevenue : totals.revenue;
 
-    return { ...totals, dcCuf, averageDailyYield };
-  }, [projectKPIs]);
+    return { ...totals, dcCuf, averageDailyYield, generation, revenue };
+  }, [projectKPIs, projects, timeRange]);
 
   const tableData = useMemo(() => {
     return projects.map((p, idx) => {
       const kpi = projectKPIs[idx];
+      // On the ALL timeline, prefer SolisCloud's authoritative lifetime figure
+      // (project.lifetimeKWh) so the row matches SolisCloud exactly. For 6M /
+      // 12M we sum the monthly data — same field that drives Solis's own
+      // monthly figures, just over a smaller window.
+      const useLifetime = timeRange === 'ALL' && !!p.lifetimeKWh && p.lifetimeKWh > 0;
+      const generation = useLifetime ? p.lifetimeKWh! : kpi.totalExport;
+      // Revenue follows the same rule: on ALL, multiply Solis's lifetime energy
+      // by the project's tariff so the row matches SolisCloud's "Earning".
+      const revenue = useLifetime ? p.lifetimeKWh! * (p.tariff || 0) : kpi.revenue;
       return {
         projectCode: p.projectCode,
         projectName: p.projectName,
         projectState: p.projectState,
         capacityKWdc: kpi.totalCapacityKWdc,
-        revenue: kpi.revenue,
+        revenue,
         targetRevenue: kpi.targetRevenue,
+        totalExport: kpi.totalExport,
+        generation,
         netEnergy: kpi.netEnergy,
         dcCuf: kpi.dcCuf,
         co2Reduction: kpi.co2Reduction,
@@ -75,7 +105,7 @@ const ProjectManagementPage: React.FC<Props> = ({ projects, onSaveProject }) => 
         isAboveTarget: kpi.netEnergy >= kpi.targetOM,
       };
     });
-  }, [projects, projectKPIs]);
+  }, [projects, projectKPIs, timeRange]);
 
   const filteredTableData = useMemo(() => {
     return tableData.filter(item =>
@@ -123,6 +153,9 @@ const ProjectManagementPage: React.FC<Props> = ({ projects, onSaveProject }) => 
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">Project Management</h1>
           <p className="text-solar-text">Browse, search, and manage your portfolio of solar projects.</p>
+          <p className="text-sm text-gray-400 mt-1">
+            Total Projects: <span className="font-bold text-solar-accent">{projects.length}</span>
+          </p>
         </div>
         {isAdmin && (
           <button
@@ -168,8 +201,25 @@ const ProjectManagementPage: React.FC<Props> = ({ projects, onSaveProject }) => 
             <thead className="table-header">
               <tr>
                 <th className="table-cell cursor-pointer" onClick={() => handleSort('projectName')}>Project <SortIcon direction={sortConfig.key === 'projectName' ? sortConfig.direction : null} /></th>
-                <th className="table-cell text-right cursor-pointer" onClick={() => handleSort('netEnergy')}>Gen (kWh) <SortIcon direction={sortConfig.key === 'netEnergy' ? sortConfig.direction : null} /></th>
-                <th className="table-cell text-right cursor-pointer" onClick={() => handleSort('averageDailyYield')}>Daily Yield <SortIcon direction={sortConfig.key === 'averageDailyYield' ? sortConfig.direction : null} /></th>
+                <th
+                  className="table-cell text-right cursor-pointer"
+                  onClick={() => handleSort('generation')}
+                  title={
+                    timeRange === 'ALL'
+                      ? "Lifetime generation (SolisCloud's station-level roll-up). Matches SolisCloud exactly."
+                      : 'Gross generation (sum of monthly inverter export) over the selected period.'
+                  }
+                >
+                  Generation <SortIcon direction={sortConfig.key === 'generation' ? sortConfig.direction : null} />
+                </th>
+                <th
+                  className="table-cell text-right cursor-pointer"
+                  onClick={() => handleSort('averageDailyYield')}
+                  title="Average daily specific yield"
+                >
+                  Daily Yield <span className="text-[10px] font-normal text-gray-500">(kWh/kWp/day)</span>{' '}
+                  <SortIcon direction={sortConfig.key === 'averageDailyYield' ? sortConfig.direction : null} />
+                </th>
                 <th className="table-cell text-right cursor-pointer" onClick={() => handleSort('dcCuf')}>DC CUF % <SortIcon direction={sortConfig.key === 'dcCuf' ? sortConfig.direction : null} /></th>
                 <th className="table-cell text-right cursor-pointer" onClick={() => handleSort('revenue')}>Revenue <SortIcon direction={sortConfig.key === 'revenue' ? sortConfig.direction : null} /></th>
                 {isAdmin && <th className="table-cell text-center">Actions</th>}
@@ -179,10 +229,10 @@ const ProjectManagementPage: React.FC<Props> = ({ projects, onSaveProject }) => 
               {!searchTerm && (
                 <tr className="bg-[#122033] font-bold text-white">
                   <td className="p-4">ALL PROJECTS</td>
-                  <td className="p-4 text-right text-solar-success">{formatIndian(aggregateTotals.netEnergy, 'unit')}</td>
+                  <td className="p-4 text-right text-solar-success">{formatEnergyKWhString(aggregateTotals.generation)}</td>
                   <td className="p-4 text-right text-cyan-300">{aggregateTotals.averageDailyYield.toFixed(2)}</td>
                   <td className="p-4 text-right">{aggregateTotals.dcCuf.toFixed(1)}%</td>
-                  <td className="p-4 text-right text-solar-accent">{formatIndian(aggregateTotals.revenue, 'curr')}</td>
+                  <td className="p-4 text-right text-solar-accent">{formatINR(aggregateTotals.revenue)}</td>
                   {isAdmin && <td className="p-4 text-center"></td>}
                 </tr>
               )}
@@ -197,10 +247,10 @@ const ProjectManagementPage: React.FC<Props> = ({ projects, onSaveProject }) => 
                     <Link to={`/project/${row.projectCode}`} className="link">{row.projectName}</Link>
                     <span className="subtext">{row.projectState}</span>
                   </td>
-                  <td className={`p-4 text-right font-medium ${row.isAboveTarget ? 'text-solar-success' : 'text-red-400'}`}>{formatIndian(row.netEnergy, 'unit')}</td>
+                  <td className={`p-4 text-right font-medium ${row.isAboveTarget ? 'text-solar-success' : 'text-red-400'}`}>{formatEnergyKWhString(row.generation)}</td>
                   <td className="p-4 text-right font-mono text-cyan-300">{row.averageDailyYield.toFixed(2)}</td>
                   <td className="p-4 text-right">{row.dcCuf.toFixed(1)}%</td>
-                  <td className="p-4 text-right">{formatIndian(row.revenue, 'curr')}</td>
+                  <td className="p-4 text-right">{formatINR(row.revenue)}</td>
                   {isAdmin && (
                     <td className="p-4 text-center">
                       <button

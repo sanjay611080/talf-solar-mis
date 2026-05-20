@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Project, ChartDataPoint, TimeRange, ModuleBuild, KPIResult, InverterKPIResult } from '../types';
-import { calculateKPIs, filterMonthlyData, calculateInverterKPIs } from '../services/dataService';
+import { calculateKPIs, filterMonthlyData, calculateInverterKPIs, operationalSpanInMonth } from '../services/dataService';
 import { getModuleBuilds } from '../services/moduleBuildService';
 import CombinedPerformanceChart from '../components/CombinedPerformanceChart';
 import DataEntryModal from '../components/DataEntryModal';
@@ -52,15 +52,17 @@ const ProjectDetailsPage: React.FC<Props> = ({ projects, onUpdateProject }) => {
     
     const monthlyValues = filterMonthlyData(project.monthlyData, timeRange);
     const commissioningDate = new Date(project.dateOfCommissioning);
-    
+    const now = new Date();
+
     return monthlyValues.sort((a, b) => a.month.localeCompare(b.month)).map(m => {
       const monthlyExport = (m.inverterExportKWh || []).reduce((s, v) => s + v, 0);
       const monthlyTargetOM = (m.inverterTargetOMKWh || []).reduce((s, v) => s + v, 0);
       const monthlyDcKW = (m.inverterDcCapacityKW || []).reduce((s, v) => s + v, 0);
       const net = monthlyExport - (m.electricityImportedKWh || 0);
 
-      const year = parseInt(m.month.split('-')[0]), monthVal = parseInt(m.month.split('-')[1]);
-      const hours = new Date(year, monthVal, 0).getDate() * 24;
+      // Actual operational hours, not calendar hours — keeps the per-month CUF
+      // line on the chart honest for commissioning month and the current month.
+      const { hours } = operationalSpanInMonth(m.month, commissioningDate, now);
 
       const monthDate = new Date(m.month + '-02');
       const monthsDiff = monthDate.getMonth() - commissioningDate.getMonth() + 12 * (monthDate.getFullYear() - commissioningDate.getFullYear());
@@ -77,7 +79,10 @@ const ProjectDetailsPage: React.FC<Props> = ({ projects, onUpdateProject }) => {
             if (monthsDiff < 12) totalDegradationPercent = (monthsDiff + 1) * firstYearDegradationPerMonth;
             else totalDegradationPercent = build.degradation.firstYear + (monthsDiff - 11) * subsequentYearDegradationPerMonth;
           }
-          prDenominator += irradiation * (inv.moduleCount * build.area * (1 - totalDegradationPercent / 100));
+          // IEC 61724 PR denominator: H_POA × P_DC × (1 − degradation).
+          // P_DC = moduleCount × Wp / 1000.
+          const dcCapacityKW = (inv.moduleCount * build.wp) / 1000;
+          prDenominator += irradiation * dcCapacityKW * (1 - totalDegradationPercent / 100);
         }
       });
       const pr = prDenominator > 0 ? (net / prDenominator) * 100 : 0;
