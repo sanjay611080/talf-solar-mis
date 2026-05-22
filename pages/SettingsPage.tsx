@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { getCredentials, getSyncStatus, saveCredentials, SolisSyncStatus, testConnection, triggerSync } from '../services/solisAPIService';
+import { getCredentials, getSyncStatus, SolisSyncStatus, testConnection, triggerSync } from '../services/solisAPIService';
 import { useAuth } from '../context/AuthContext';
 
 /** "3m 24s" / "42s" / "2h 05m". */
@@ -29,9 +29,6 @@ function formatRelative(ts: number): string {
 
 const SettingsPage: React.FC = () => {
   const { currentUser } = useAuth();
-  const [apiKey, setApiKey] = useState('');
-  const [apiSecret, setApiSecret] = useState('');
-  const [apiBaseUrl, setApiBaseUrl] = useState('');
   const [hasSecret, setHasSecret] = useState(false);
   const [source, setSource] = useState<'environment' | 'database' | 'none'>('none');
   const [savedMsg, setSavedMsg] = useState('');
@@ -76,12 +73,10 @@ const SettingsPage: React.FC = () => {
     (async () => {
       try {
         const creds = await getCredentials();
-        setApiKey(creds.apiKey);
-        setApiBaseUrl(creds.apiBaseUrl || '');
         setHasSecret(creds.hasSecret);
         setSource(creds.source);
       } catch {
-        /* backend unreachable — leave fields empty */
+        /* backend unreachable */
       }
     })();
   }, []);
@@ -104,27 +99,10 @@ const SettingsPage: React.FC = () => {
     setTimeout(() => setSavedMsg(''), ms);
   };
 
-  const handleSave = async () => {
-    setBusy(true);
-    try {
-      await saveCredentials(apiKey, apiSecret, apiBaseUrl);
-      setHasSecret(true);
-      setApiSecret('');
-      flash('Credentials saved successfully.');
-    } catch (e) {
-      flash(e instanceof Error ? e.message : 'Failed to save credentials.', 5000);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleTest = async () => {
     setBusy(true);
     try {
-      await saveCredentials(apiKey, apiSecret, apiBaseUrl);
       await testConnection();
-      setHasSecret(true);
-      setApiSecret('');
       flash('Connected to SolisCloud successfully.');
     } catch (e) {
       flash(e instanceof Error ? e.message : 'Connection test failed.', 5000);
@@ -186,50 +164,48 @@ const SettingsPage: React.FC = () => {
       </header>
 
       <div className="bg-solar-card rounded-lg border border-solar-border p-6 space-y-4">
-        {source === 'environment' && (
-          <div className="text-xs text-solar-accent bg-solar-bg border border-solar-border rounded p-2">
-            Credentials are currently provided by the server environment (.env) and take precedence over anything saved here.
+        <h2 className="text-base font-semibold text-white">API Credentials</h2>
+
+        {/* Status row */}
+        <div className="flex items-center justify-between gap-4 bg-solar-bg rounded-lg border border-solar-border px-4 py-3">
+          <div className="flex items-center gap-3">
+            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${hasSecret && source !== 'none' ? 'bg-emerald-400' : 'bg-red-500'}`} />
+            <div>
+              <p className="text-sm font-medium text-white">
+                {hasSecret && source !== 'none' ? 'Credentials configured' : 'No credentials saved'}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {source === 'environment'
+                  ? 'Loaded from server environment variables'
+                  : source === 'database'
+                    ? 'Loaded from backend database'
+                    : 'Set SOLIS_API_ID and SOLIS_API_SECRET in the backend environment'}
+              </p>
+            </div>
           </div>
-        )}
-        <div>
-          <label className="label">API Base URL</label>
-          <input
-            type="text"
-            placeholder="https://www.soliscloud.com:13333"
-            className="input-field"
-            value={apiBaseUrl}
-            onChange={(e) => setApiBaseUrl(e.target.value)}
-          />
+
+          {/* Masked credential badges */}
+          {hasSecret && source !== 'none' && (
+            <div className="flex items-center gap-3 text-xs font-mono text-gray-400">
+              <span className="bg-solar-border px-2 py-1 rounded">ID ••••••••</span>
+              <span className="bg-solar-border px-2 py-1 rounded">Secret ••••••••</span>
+            </div>
+          )}
         </div>
-        <div>
-          <label className="label">API ID</label>
-          <input
-            type="text"
-            placeholder="Enter your SolisCloud API ID"
-            className="input-field"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label">API Secret</label>
-          <input
-            type="password"
-            placeholder={hasSecret ? '•••••••• (saved — leave blank to keep)' : 'Enter your SolisCloud API Secret'}
-            className="input-field"
-            value={apiSecret}
-            onChange={(e) => setApiSecret(e.target.value)}
-          />
-        </div>
+
         <p className="text-xs text-gray-500">
-          Find your credentials in SolisCloud under "Account" &rarr; "Basic Settings" &rarr; "API Management".
-          The secret is stored on the backend and never sent back to the browser.
+          Credentials are managed via backend environment variables (<code className="text-gray-300">SOLIS_API_ID</code>, <code className="text-gray-300">SOLIS_API_SECRET</code>, <code className="text-gray-300">SOLIS_BASE_URL</code>) and are never exposed to the browser.
         </p>
 
-        <div className="flex flex-wrap justify-end items-center gap-3 pt-4 border-t border-solar-border">
-          {savedMsg && <span className="text-solar-success text-sm mr-auto">{savedMsg}</span>}
-          <button onClick={handleTest} disabled={busy || !apiKey} className="px-4 py-2 rounded bg-solar-border text-white hover:bg-gray-600 transition disabled:opacity-50">Test Connection</button>
-          <button onClick={handleSave} disabled={busy || !apiKey} className="px-6 py-2 rounded bg-solar-success text-white font-bold hover:bg-green-600 transition disabled:opacity-50">Save</button>
+        <div className="flex flex-wrap justify-end items-center gap-3 pt-3 border-t border-solar-border">
+          {savedMsg && <span className={`text-sm mr-auto ${savedMsg.toLowerCase().includes('fail') || savedMsg.toLowerCase().includes('error') ? 'text-red-400' : 'text-solar-success'}`}>{savedMsg}</span>}
+          <button
+            onClick={handleTest}
+            disabled={busy || !hasSecret}
+            className="px-4 py-2 rounded bg-solar-border text-white hover:bg-gray-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {busy ? 'Testing…' : 'Test Connection'}
+          </button>
         </div>
       </div>
 
