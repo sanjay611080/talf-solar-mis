@@ -53,13 +53,6 @@ const Dashboard: React.FC<Props> = ({ projects }) => {
       totalStats.targetOM += k.targetOM;
       totalWeightedTariffNumerator += (k.tariff * k.totalCapacityKWac);
     });
-
-    // Total of (DC capacity × operational days) across the whole portfolio.
-    // This is the correct denominator for a portfolio-wide daily-yield figure:
-    // each project contributes its own kWdc multiplied by the days it was
-    // actually able to generate during the selected window. Using a single
-    // project's `totalDays` (the previous behaviour) gave nonsense numbers on
-    // the ALL timeline because projects have very different lifetimes.
     const totalCapacityDaysDc = projectKPIs.reduce(
       (sum, k) => sum + k.totalCapacityKWdc * k.totalDays,
       0,
