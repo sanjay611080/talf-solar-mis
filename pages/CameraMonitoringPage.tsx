@@ -6,11 +6,6 @@ import { useAuth } from '../context/AuthContext';
 import CameraTile from '../components/CameraTile';
 import CameraDetailModal from '../components/CameraDetailModal';
 
-/**
- * Camera monitoring is not yet wired to a real source — the data source and
- * device registration flow are still being decided. Until then this page runs
- * on the self-contained mock below so the UI can be built and reviewed.
- */
 interface MockCameraSite {
   projectName: string;
   projectState: string;
