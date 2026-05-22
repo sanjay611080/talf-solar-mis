@@ -1,7 +1,9 @@
 
-const STORAGE_KEY = 'helios_mis_audit_logs_v1';
-const SESSION_USER_KEY = 'helios_mis_current_user';
-const MAX_LOGS = 1000;
+import { apiFetch, getToken } from './apiClient';
+
+// ---------------------------------------------------------------------------
+// Types (unchanged from the original — all callers depend on these)
+// ---------------------------------------------------------------------------
 
 export type AuditAction =
   | 'create'
@@ -14,7 +16,8 @@ export type AuditAction =
   | 'login_blocked'
   | 'logout'
   | 'block'
-  | 'unblock';
+  | 'unblock'
+  | 'sync';
 
 export type AuditEntityType =
   | 'user'
@@ -22,7 +25,8 @@ export type AuditEntityType =
   | 'module_build'
   | 'auth'
   | 'settings'
-  | 'security';
+  | 'security'
+  | 'sync';
 
 export interface AuditChange {
   field: string;
@@ -44,10 +48,11 @@ export interface AuditLog {
   metadata?: Record<string, any>;
 }
 
-const newLogId = (): string =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+const SESSION_USER_KEY = 'helios_mis_current_user';
 
 /** Returns the username of the currently logged-in user, or 'system'. */
 const getCurrentUsername = (): string => {
@@ -63,27 +68,9 @@ const getCurrentUsername = (): string => {
   return 'system';
 };
 
-export const getLogs = (): AuditLog[] => {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (e) {
-    console.error('Failed to load audit logs', e);
-  }
-  return [];
-};
-
-const saveLogs = (logs: AuditLog[]) => {
-  try {
-    const trimmed = logs.length > MAX_LOGS ? logs.slice(-MAX_LOGS) : logs;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
-  } catch (e) {
-    console.error('Failed to save audit logs', e);
-  }
-};
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 interface LogPayload {
   action: AuditAction;
@@ -93,14 +80,20 @@ interface LogPayload {
   description: string;
   changes?: AuditChange[];
   metadata?: Record<string, any>;
-  /** Override the actor — defaults to the current user. */
+  /** Override the actor — defaults to the current user from session. */
   performedBy?: string;
 }
 
-export const logEvent = (payload: LogPayload): AuditLog => {
-  const log: AuditLog = {
-    id: newLogId(),
-    timestamp: new Date().toISOString(),
+/**
+ * Fires an audit event to the backend database.
+ *
+ * Completely non-blocking: the POST is sent in the background. Failures are
+ * swallowed so a logging hiccup never breaks the UI. Login events where the
+ * user doesn't yet have a token are also sent — if the backend rejects them
+ * (401) the error is silently dropped.
+ */
+export const logEvent = (payload: LogPayload): void => {
+  const body = {
     performedBy: payload.performedBy || getCurrentUsername(),
     action: payload.action,
     entityType: payload.entityType,
@@ -109,13 +102,45 @@ export const logEvent = (payload: LogPayload): AuditLog => {
     description: payload.description,
     changes: payload.changes && payload.changes.length > 0 ? payload.changes : undefined,
     metadata: payload.metadata,
+    timestamp: new Date().toISOString(),
   };
-  const logs = getLogs();
-  logs.push(log);
-  saveLogs(logs);
-  return log;
+
+  // Always attempt the POST. Callers that fire this before a token exists
+  // (e.g. login_failed from userService) will silently fail — those events
+  // are also logged server-side by the auth route, so nothing is lost.
+  const token = getToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  fetch(
+    (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api') + '/audit',
+    { method: 'POST', headers, body: JSON.stringify(body) },
+  ).catch(() => {
+    // Never let audit failures surface to the user.
+  });
 };
 
+/**
+ * Fetches all audit logs from the backend.
+ * Admin-only on the backend (non-admins receive a 403).
+ * Returns newest-first (the backend already orders by timestamp DESC).
+ */
+export const getLogs = async (): Promise<AuditLog[]> => {
+  return apiFetch<AuditLog[]>('/audit');
+};
+
+/**
+ * Permanently deletes all audit log entries.
+ * Admin-only on the backend.
+ */
+export const clearLogs = async (): Promise<void> => {
+  await apiFetch<void>('/audit', { method: 'DELETE' });
+};
+
+/**
+ * Computes field-level diffs between two objects.
+ * Fields in `fields` are compared in order; if omitted, all keys are diffed.
+ */
 export const computeChanges = (
   before: any,
   after: any,
@@ -136,8 +161,4 @@ export const computeChanges = (
     }
   }
   return changes;
-};
-
-export const clearLogs = () => {
-  saveLogs([]);
 };

@@ -18,6 +18,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   logout: 'Logout',
   block: 'Block',
   unblock: 'Unblock',
+  sync: 'Sync',
 };
 
 const ENTITY_LABELS: Record<AuditEntityType, string> = {
@@ -27,6 +28,7 @@ const ENTITY_LABELS: Record<AuditEntityType, string> = {
   auth: 'Authentication',
   settings: 'Settings',
   security: 'Security',
+  sync: 'Sync',
 };
 
 const actionBadgeClass = (action: AuditAction) => {
@@ -42,6 +44,7 @@ const actionBadgeClass = (action: AuditAction) => {
     case 'logout':         return 'bg-gray-500/20 text-gray-300 border border-gray-500/40';
     case 'block':          return 'bg-red-500/20 text-red-300 border border-red-500/40';
     case 'unblock':        return 'bg-green-500/20 text-green-300 border border-green-500/40';
+    case 'sync':           return 'bg-purple-500/20 text-purple-300 border border-purple-500/40';
     default:               return 'bg-gray-500/20 text-gray-300 border border-gray-500/40';
   }
 };
@@ -65,6 +68,8 @@ const formatValue = (value: any): string => {
 const AuditLogsPage: React.FC = () => {
   const { currentUser } = useAuth();
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [userFilter, setUserFilter] = useState<string>('all');
   const [actionFilter, setActionFilter] = useState<AuditAction | 'all'>('all');
@@ -72,8 +77,18 @@ const AuditLogsPage: React.FC = () => {
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
-  const refresh = () => {
-    setLogs(auditService.getLogs().slice().reverse()); // newest first
+  const refresh = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      // Backend returns newest-first (ORDER BY timestamp DESC).
+      const data = await auditService.getLogs();
+      setLogs(data);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load audit logs');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -120,10 +135,14 @@ const AuditLogsPage: React.FC = () => {
     setEntityFilter('all');
   };
 
-  const handleClearLogs = () => {
-    auditService.clearLogs();
-    refresh();
+  const handleClearLogs = async () => {
+    try {
+      await auditService.clearLogs();
+    } catch (err) {
+      console.error('Failed to clear logs', err);
+    }
     setExpandedLogId(null);
+    await refresh();
   };
 
   const filtersActive = searchTerm || userFilter !== 'all' || actionFilter !== 'all' || entityFilter !== 'all';
@@ -136,11 +155,14 @@ const AuditLogsPage: React.FC = () => {
           <p className="text-solar-text">Version history of every action — who did what, when, and what changed.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {isLoading && <span className="text-sm text-yellow-400 animate-pulse">Loading…</span>}
+          {loadError && <span className="text-sm text-red-400">{loadError}</span>}
           <button
             onClick={refresh}
-            className="px-3 py-2 rounded bg-solar-bg border border-solar-border text-gray-300 hover:text-white hover:border-solar-accent transition flex items-center gap-2 text-sm"
+            disabled={isLoading}
+            className="px-3 py-2 rounded bg-solar-bg border border-solar-border text-gray-300 hover:text-white hover:border-solar-accent transition flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Refresh
@@ -220,7 +242,13 @@ const AuditLogsPage: React.FC = () => {
               {filteredLogs.length === 0 && (
                 <tr>
                   <td colSpan={6} className="text-center py-8 text-gray-500">
-                    {logs.length === 0 ? 'No activity logged yet.' : 'No entries match the current filters.'}
+                    {isLoading
+                      ? 'Loading audit logs…'
+                      : loadError
+                        ? loadError
+                        : logs.length === 0
+                          ? 'No activity logged yet.'
+                          : 'No entries match the current filters.'}
                   </td>
                 </tr>
               )}
