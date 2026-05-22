@@ -81,7 +81,6 @@ const AuditLogsPage: React.FC = () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      // Backend returns newest-first (ORDER BY timestamp DESC).
       const data = await auditService.getLogs();
       setLogs(data);
     } catch (err) {
